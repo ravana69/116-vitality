@@ -1,0 +1,124 @@
+<script async src="https://ga.jspm.io/npm:es-module-shims@1.4.3/dist/es-module-shims.js" crossorigin="anonymous"></script>
+<script type='importmap-shim'>
+  {
+    "imports": {
+      "three": "https://unpkg.com/three@0.138.3/build/three.module.js",
+      "three/": "https://unpkg.com/three@0.138.3/",
+      "omega/": "https://cdn.jsdelivr.net/gh/ycw/omega@0.0.2/"
+    }
+  }
+</script>
+<script defer type='module-shim'>
+import * as THREE from 'three'
+import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
+import { Strip, StripGeometry } from 'omega/dist/Strip.js'
+import { CSG } from 'omega/dist/CSG.js'
+import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js'
+import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js'
+import { DualBloomPass } from 'omega/dist/DualBloom.js'
+
+// ----
+// main
+// ----
+
+const renderer = new THREE.WebGLRenderer();
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(75, 2, .1, 100);
+const controls = new OrbitControls(camera, renderer.domElement);
+
+controls.target.set(0, 1.5, 0);
+camera.position.set(-.5, .8, 2);
+controls.enableDamping = true;
+scene.background = new THREE.Color('white');
+controls.autoRotate = true;
+scene.fog = new THREE.FogExp2('skyblue', .35); // ozone
+
+{
+  const N_INST = 20000;
+  const GRID = new THREE.Vector3(4, 0, 6);
+  const strip = new Strip(new THREE.QuadraticBezierCurve3(
+    new THREE.Vector3(.2, .7, 0),
+    new THREE.Vector3(-.1, 0.3, 0),
+    new THREE.Vector3(0, 0, 0),
+  ), (i, I) => .0135 * (i / I), (i, I) => Math.PI * 0.4 * i / I);
+  const geom = new StripGeometry(strip, 10);
+  const mat = new THREE.MeshPhysicalMaterial({ roughness: 1, fog: true });
+  const mesh = new THREE.InstancedMesh(geom, mat, N_INST);
+  const mat_r = new THREE.Matrix4();
+  const mat_s = new THREE.Matrix4();
+  const col = new THREE.Color();
+  for (let i = 0; i < N_INST; ++i) {
+    mesh.setMatrixAt(i, mat_r.makeRotationY(Math.random() * Math.PI * 2)
+      .multiply(mat_s.makeScale(Math.random() * .1 + 1, Math.random() * 2, Math.random() * .1 + 1))
+      .setPosition(Math.random() * GRID.x, 0, Math.random() * GRID.z));
+    mesh.setColorAt(i, col.set('lime').offsetHSL(.2 * (Math.random() - .6), 0, 0));
+  }
+  scene.add(mesh);
+  mesh.position.set(-.5 * GRID.x, 0, -.5 * GRID.z);
+}
+
+{
+  const light = new THREE.HemisphereLight('#ff8888', '#002200', .1); // cheat
+  scene.add(light);
+  const light2 = new THREE.RectAreaLight('#ff8888', 16, 2, 2);
+  light2.rotation.x = Math.PI / -2;
+  light2.position.set(0, 4.5, 0);
+  scene.add(light2);
+}
+
+{ // texture by Michael Humphries - https://unsplash.com/photos/JP2yYeV8zUM
+  const url0 = 'https://images.unsplash.com/photo-1565019342581-e828575ed021?ixlib=rb-1.2.1&ixid=MnwxMjA3fDB8MHxzZWFyY2h8MTAwfHx0aWxlfGVufDB8fDB8fA%3D%3D&auto=format&fit=crop&w=600&q=60';
+  const tex0 = new THREE.TextureLoader().load(url0);
+  tex0.wrapS = THREE.MirroredRepeatWrapping;
+  tex0.repeat.set(2, 1);
+  const mat0 = new THREE.MeshPhysicalMaterial({ map: tex0, bumpMap: tex0, bumpScale: -.1, roughness: 1, side: THREE.BackSide, fog: true });
+  const csg0 = CSG(new THREE.Mesh(new THREE.BoxGeometry(4, 3, 4), mat0));
+
+  const mesh1 = new THREE.Mesh(new THREE.BoxGeometry(2, 3, 4), mat0);
+  mesh1.position.set(0, 0, -2);
+  const csg1 = CSG(mesh1);
+
+  mesh1.position.set(0, 0, 2);
+  const csg2 = CSG(mesh1);
+
+  const tex1 = new THREE.TextureLoader().load(url0);
+  tex1.repeat.set(1, .5);
+  const mat1 = new THREE.MeshPhysicalMaterial({ map: tex1, bumpMap: tex1, bumpScale: -.1, roughness: 1, side: THREE.BackSide, fog: true });
+  const mesh2 = new THREE.Mesh(new THREE.BoxGeometry(2, 3, 2), [mat1, mat1, null, mat1, mat1, mat1]); // roof
+  mesh2.position.set(0, 1.5, 0);
+  const csg3 = CSG(mesh2);
+
+  const _mesh = csg0.union(csg1).union(csg2).union(csg3).toMesh();
+  _mesh.position.y = 1.5;
+  scene.add(_mesh);
+}
+
+// ----
+// render
+// ----
+
+const composer = new EffectComposer(renderer);
+composer.addPass(new RenderPass(scene, camera));
+composer.addPass(new DualBloomPass({ threshold: 0.9, intensity: 2, blurriness: .5, maxDuals: 10 }));
+
+renderer.setAnimationLoop(() => {
+  composer.render();
+  controls.update();
+});
+
+// ----
+// view
+// ----
+
+function resize(w, h, dpr = devicePixelRatio) {
+  renderer.setPixelRatio(dpr);
+  renderer.setSize(w, h, false);
+  composer.setPixelRatio(dpr);
+  composer.setSize(w, h);
+  camera.aspect = w / h;
+  camera.updateProjectionMatrix();
+}
+addEventListener('resize', () => resize(innerWidth, innerHeight));
+dispatchEvent(new Event('resize'));
+document.body.prepend(renderer.domElement);
+</script>
